@@ -664,6 +664,77 @@ jobs:
               }
           }
           RZX_EOF
+          mkdir -p "$(dirname 'app/src/main/java/com/rizzxy/store/Lock.kt')"
+          cat > 'app/src/main/java/com/rizzxy/store/Lock.kt' <<'RZX_EOF'
+          package com.rizzxy.store
+
+          import android.content.Context
+          import java.security.MessageDigest
+
+          /**
+           * Kunci akses: password utama atau salah satu dari 25 token.
+           * Yang disimpan di APK hanya hash SHA-256. Setelah berhasil, status "sudah aktif"
+           * disimpan di data app sehingga password/token tidak diminta lagi.
+           */
+          object Lock {
+              private const val PW_HASH = "d753a7b4b467d3999e023c54acd72985790fd3f85b974f87f85f0ccd444fa8d5"
+
+              private val TOKENS = listOf(
+                  "fb835c8e5ae697a4c087f9345b3fc602e2fc48d00f0ba2aa120a36cd24a9224c",
+                  "71bac9f8c3615b7063e0d6aa5e0cd3ca7a56d50a43c1542cfa100ca4de7c7b75",
+                  "47d89dba8e27de191646ea7b61cc7156f263fa16a4cfbdd6168a88184ce7b4d8",
+                  "f2ccf890abe4cfe8a4c7027221615eee661dbe73aac06e31ec4ed40a3e42f266",
+                  "4851e4eec635ffb875cca74e78cea070b60d8dc2c1203e3ec11d6d031c12674b",
+                  "71040f0d8d64a3047e497b5e243823bcef2c054f85e931f9c4223d6f180b033b",
+                  "4667b6ef8f72308b79e971f43a61071bfd5828836f13992002b0d3722198a7a4",
+                  "7fe11eb4691371dcf64975031122a4ba695fd71669c23bc3242093fdce5f885d",
+                  "2bdfd8bd2c84f77e743a9053029f72eb19d5594feebdbf52b7df05018ff35efe",
+                  "c6de7dc583dd4eb6aa7ddf82a11598c0e292e033a5b21e8e81bb5f9915323d89",
+                  "d2fde4f0049143843877258724427bcc848a361f5c7b1b6f2605a583ee1d54f7",
+                  "147135e9a6525e40daa996dcc24e17af989237c1e5088925f7ae14d8ccea8440",
+                  "5ee59666c1cd4e5b7dc658b6677a7a681ec79c9f850de38fb0eef3fa354b76d7",
+                  "78491d8861d68eba1a81b9d932782c068217d2df5a107c1c02d06408f5037292",
+                  "b9841c9caaa575f7d6231e22853cad44513162e846e94d864100af2722170caf",
+                  "c54e46bfb73f4b2c5e2b33d32879f37d665af952319434c5557c61e83d58fcea",
+                  "7ced2e8da77b895830581f59d7dd74210849b61bfe04fa9bb6f03f0a353496e9",
+                  "aed75d3971200f9c8a96beb61e9f3c359e0944e4444aea9ee74ae9fc923349dd",
+                  "5f2bba9fd1528667c1968943385cc19d4b9379a5a0354ad9a52de5c989250b7a",
+                  "84a9d268c36cf380532fd4b1c936d69bfaa6926c76b2868741c6c2bf2846581a",
+                  "1b5cae47287795cd5013ebc63698cbf82c7fc955b9b3636afb6584e30280be87",
+                  "4775e30ee0f7b499161dcc258f18bc27db04903ddfc7c9379615dd2b666bceef",
+                  "e3aea4060919395f635af01bdf45c023d7e0a13da5b1a3b11da256872822c4a8",
+                  "eec6c2fdaadb294728cb2009b7f39c85129148075ad4117bd09da5900a7b7727",
+                  "996e5189f8e91b67b8ad02ecff859ee003b43860beae83925aa0e9e276ed7d98"
+              )
+
+              @Volatile
+              var unlocked = false
+
+              private fun sp(c: Context) = c.getSharedPreferences("lock", Context.MODE_PRIVATE)
+
+              fun isUnlocked(c: Context): Boolean {
+                  if (!unlocked && sp(c).getBoolean("ok", false)) unlocked = true
+                  return unlocked
+              }
+
+              private fun sha256(t: String): String =
+                  MessageDigest.getInstance("SHA-256").digest(t.toByteArray()).joinToString("") { "%02x".format(it) }
+
+              /** Kembalikan label ("PW" atau "T01".."T25") kalau benar, null kalau salah. */
+              fun check(input: String): String? {
+                  val h = sha256(input.trim().uppercase())
+                  if (h == PW_HASH) return "PW"
+                  val i = TOKENS.indexOf(h)
+                  return if (i >= 0) "T%02d".format(i + 1) else null
+              }
+
+              /** Simpan status aktif ke data app (tidak diminta lagi di pembukaan berikutnya). */
+              fun save(c: Context, by: String) {
+                  unlocked = true
+                  sp(c).edit().putBoolean("ok", true).putString("by", by).apply()
+              }
+          }
+          RZX_EOF
           mkdir -p "$(dirname 'app/src/main/java/com/rizzxy/store/MainActivity.kt')"
           cat > 'app/src/main/java/com/rizzxy/store/MainActivity.kt' <<'RZX_EOF'
           package com.rizzxy.store
@@ -696,7 +767,6 @@ jobs:
           import android.widget.CheckBox
           import android.widget.FrameLayout
           import java.io.File
-          import java.security.MessageDigest
           import java.util.concurrent.Callable
           import android.widget.EditText
           import android.widget.ImageView
@@ -771,7 +841,7 @@ jobs:
                   admin = ComponentName(this, AdminReceiver::class.java)
                   val ui = buildUi()
                   setContentView(ui)
-                  if (!unlocked) {
+                  if (!Lock.isUnlocked(this)) {
                       ui.visibility = View.INVISIBLE
                       showLock(ui)
                   }
@@ -786,19 +856,8 @@ jobs:
                   loadAppsAsync { refresh() }
               }
 
-              companion object {
-                  /** true setelah password benar (bertahan selama proses app hidup). */
-                  @Volatile
-                  var unlocked = false
-                  // SHA-256 dari password (tidak disimpan sebagai teks biasa)
-                  private const val PW_HASH = "d753a7b4b467d3999e023c54acd72985790fd3f85b974f87f85f0ccd444fa8d5"
-              }
-
-              private fun sha256(t: String): String =
-                  MessageDigest.getInstance("SHA-256").digest(t.toByteArray()).joinToString("") { "%02x".format(it) }
-
               private fun showLock(ui: View) {
-                  val et = field("PASSWORD", false)
+                  val et = field("PASSWORD / TOKEN", false)
                   et.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
                   val wrap = LinearLayout(this).apply {
                       setPadding(dp(20), dp(8), dp(20), 0)
@@ -806,7 +865,7 @@ jobs:
                   }
                   val d = AlertDialog.Builder(this)
                       .setTitle("RIZZXY STORE")
-                      .setMessage("Masukkan password untuk masuk")
+                      .setMessage("Masukkan password atau token. Cukup sekali, setelah itu tidak diminta lagi.")
                       .setView(wrap)
                       .setCancelable(false)
                       .setPositiveButton("MASUK", null)
@@ -814,13 +873,14 @@ jobs:
                       .create()
                   d.show()
                   d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                      if (sha256(et.text.toString().trim().uppercase()) == PW_HASH) {
-                          unlocked = true
+                      val by = Lock.check(et.text.toString())
+                      if (by != null) {
+                          Lock.save(this, by)
                           ui.visibility = View.VISIBLE
                           d.dismiss()
                       } else {
                           et.setText("")
-                          et.error = "Password salah"
+                          et.error = "Password / token salah"
                       }
                   }
               }
@@ -1034,12 +1094,16 @@ jobs:
                       loadAppsAsync { refresh(); toast("Daftar aplikasi dimuat ulang") }
                   })
                   if (Theme.hasVideo) {
-                      val snd = iconBtn(if (Theme.muted) "🔇" else "🔊", green) {}
+                      val snd = ImageView(this).apply {
+                          setImageResource(if (Theme.muted) R.drawable.ic_vol_off else R.drawable.ic_vol_on)
+                          setColorFilter(green)
+                          scaleType = ImageView.ScaleType.CENTER
+                      }
                       snd.setOnClickListener {
                           toggleMute()
-                          snd.text = if (Theme.muted) "🔇" else "🔊"
+                          snd.setImageResource(if (Theme.muted) R.drawable.ic_vol_off else R.drawable.ic_vol_on)
                       }
-                      titleRow.addView(snd)
+                      titleRow.addView(snd, LinearLayout.LayoutParams(dp(44), dp(36)))
                   }
                   titleRow.addView(iconBtn("◐", green) { openTheme() })
                   titleRow.addView(iconBtn("⚙\uFE0E", green) { openSettings() })
@@ -1265,7 +1329,13 @@ jobs:
                   })
                   if (Theme.hasVideo) {
                       val muteBtn = softBtn("") {}
-                      fun lbl() { muteBtn.text = if (Theme.muted) "🔇 SUARA VIDEO: MUTE (ketuk = UNMUTE)" else "🔊 SUARA VIDEO: UNMUTE (ketuk = MUTE)" }
+                      fun lbl() {
+                          muteBtn.text = if (Theme.muted) "SUARA VIDEO: MUTE (ketuk = UNMUTE)" else "SUARA VIDEO: UNMUTE (ketuk = MUTE)"
+                          val ic = resources.getDrawable(if (Theme.muted) R.drawable.ic_vol_off else R.drawable.ic_vol_on, theme).mutate()
+                          ic.setTint(green)
+                          muteBtn.setCompoundDrawablesWithIntrinsicBounds(ic, null, null, null)
+                          muteBtn.compoundDrawablePadding = dp(8)
+                      }
                       lbl()
                       muteBtn.setOnClickListener { toggleMute(); lbl() }
                       box.addView(muteBtn, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
@@ -3239,6 +3309,32 @@ jobs:
 
               override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
           }
+          RZX_EOF
+          mkdir -p "$(dirname 'app/src/main/res/drawable/ic_vol_off.xml')"
+          cat > 'app/src/main/res/drawable/ic_vol_off.xml' <<'RZX_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#FFFFFFFF"
+                  android:pathData="M16.5,12c0,-1.77 -1.02,-3.29 -2.5,-4.03v2.21l2.45,2.45c0.03,-0.2 0.05,-0.41 0.05,-0.63z M19,12c0,0.94 -0.2,1.82 -0.54,2.64l1.51,1.51C20.63,14.91 21,13.5 21,12c0,-4.28 -2.99,-7.86 -7,-8.77v2.06c2.89,0.86 5,3.54 5,6.71z M4.27,3L3,4.27 7.73,9H3v6h4l5,5v-6.73l4.25,4.25c-0.67,0.52 -1.42,0.93 -2.25,1.18v2.06c1.38,-0.31 2.63,-0.95 3.69,-1.81L19.73,21 21,19.73l-9,-9L4.27,3z M12,4L9.91,6.09 12,8.18V4z" />
+          </vector>
+          RZX_EOF
+          mkdir -p "$(dirname 'app/src/main/res/drawable/ic_vol_on.xml')"
+          cat > 'app/src/main/res/drawable/ic_vol_on.xml' <<'RZX_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#FFFFFFFF"
+                  android:pathData="M3,9v6h4l5,5V4L7,9H3z M16.5,12c0,-1.77 -1.02,-3.29 -2.5,-4.03v8.05c1.48,-0.73 2.5,-2.25 2.5,-4.02z M14,3.23v2.06c2.89,0.86 5,3.54 5,6.71s-2.11,5.85 -5,6.71v2.06c4.01,-0.91 7,-4.49 7,-8.77s-2.99,-7.86 -7,-8.77z" />
+          </vector>
           RZX_EOF
           mkdir -p "$(dirname 'app/src/main/res/values/strings.xml')"
           cat > 'app/src/main/res/values/strings.xml' <<'RZX_EOF'
