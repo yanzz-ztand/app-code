@@ -556,7 +556,7 @@ jobs:
           /** Pengaturan paket + waktu, disimpan di dalam APK (bisa diubah dari menu PENGATURAN). */
           object Cfg {
               // GANTI nomor owner di sini (format internasional tanpa +, contoh 6281234567890)
-              const val OWNER_NUMBER = "62823-9858-2781"
+              const val OWNER_NUMBER = "62XXXXXXXXXXX"
 
               const val DEF_ACT = "com.moba.unityplugin.MobaGameMainActivityWithExtractor"
               const val DEF_COUNT = 5
@@ -577,8 +577,8 @@ jobs:
               // ===== NICKNAME OTOMATIS (hanya RUN 2) =====
               // mode: 0 OFF, 1 RANDOM (ketuk-ketuk), 2 REQUEST (nick sendiri, di-paste)
               // Alur per baris:  @x,y = ketuk | @x,y*N = ketuk N kali | !x,y = tahan | ~S = tunggu S detik | # = catatan
-              const val DEF_NICK_TEXT = "STOK-RIZZXY"
-              const val DEF_NICK_START = 001
+              const val DEF_NICK_TEXT = "STOK-RIZZXY-"
+              const val DEF_NICK_START = 1
               const val DEF_NICK_PRE = 2
               const val DEF_NICK_GAP_MS = 800
               const val DEF_NICK_AFTER = 3
@@ -587,9 +587,25 @@ jobs:
 
               fun nickMode(c: Context): Int = sp(c).getInt("nick.mode", 0)
               fun setNickMode(c: Context, v: Int) = sp(c).edit().putInt("nick.mode", v).apply()
-              fun nickText(c: Context): String = sp(c).getString("nick.text", DEF_NICK_TEXT) ?: DEF_NICK_TEXT
+              fun nickText(c: Context): String {
+                  val p = sp(c)
+                  // migrasi sekali: awalan lama "Ats-" -> STOK-RIZZXY-
+                  if (!p.getBoolean("nick.text.v2", false)) {
+                      if (p.getString("nick.text", null).equals("Ats-", true)) p.edit().putString("nick.text", DEF_NICK_TEXT).apply()
+                      p.edit().putBoolean("nick.text.v2", true).apply()
+                  }
+                  return p.getString("nick.text", DEF_NICK_TEXT) ?: DEF_NICK_TEXT
+              }
               fun setNickText(c: Context, v: String) = sp(c).edit().putString("nick.text", v.trim()).apply()
-              fun nickStart(c: Context): Int = sp(c).getInt("nick.start", DEF_NICK_START)
+              fun nickStart(c: Context): Int {
+                  val p = sp(c)
+                  // migrasi sekali: nilai lama 101 -> 001
+                  if (!p.getBoolean("nick.start.v2", false)) {
+                      if (p.getInt("nick.start", DEF_NICK_START) == 101) p.edit().putInt("nick.start", DEF_NICK_START).apply()
+                      p.edit().putBoolean("nick.start.v2", true).apply()
+                  }
+                  return p.getInt("nick.start", DEF_NICK_START)
+              }
               fun setNickStart(c: Context, v: Int) = sp(c).edit().putInt("nick.start", v).apply()
               fun nickPre(c: Context): Int = sp(c).getInt("nick.pre", DEF_NICK_PRE)
               fun setNickPre(c: Context, v: Int) = sp(c).edit().putInt("nick.pre", v).apply()
@@ -680,6 +696,7 @@ jobs:
           import android.widget.CheckBox
           import android.widget.FrameLayout
           import java.io.File
+          import java.security.MessageDigest
           import java.util.concurrent.Callable
           import android.widget.EditText
           import android.widget.ImageView
@@ -752,7 +769,12 @@ jobs:
                   window.navigationBarColor = Theme.t(0xFF0B0714.toInt())
                   dpm = getSystemService(DevicePolicyManager::class.java)
                   admin = ComponentName(this, AdminReceiver::class.java)
-                  setContentView(buildUi())
+                  val ui = buildUi()
+                  setContentView(ui)
+                  if (!unlocked) {
+                      ui.visibility = View.INVISIBLE
+                      showLock(ui)
+                  }
                   if (Build.VERSION.SDK_INT >= 33 &&
                       checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
                   ) {
@@ -762,6 +784,45 @@ jobs:
                   refresh()
                   // daftar aplikasi dimuat di belakang layar supaya halaman utama langsung tampil
                   loadAppsAsync { refresh() }
+              }
+
+              companion object {
+                  /** true setelah password benar (bertahan selama proses app hidup). */
+                  @Volatile
+                  var unlocked = false
+                  // SHA-256 dari password (tidak disimpan sebagai teks biasa)
+                  private const val PW_HASH = "d753a7b4b467d3999e023c54acd72985790fd3f85b974f87f85f0ccd444fa8d5"
+              }
+
+              private fun sha256(t: String): String =
+                  MessageDigest.getInstance("SHA-256").digest(t.toByteArray()).joinToString("") { "%02x".format(it) }
+
+              private fun showLock(ui: View) {
+                  val et = field("PASSWORD", false)
+                  et.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                  val wrap = LinearLayout(this).apply {
+                      setPadding(dp(20), dp(8), dp(20), 0)
+                      addView(et, LinearLayout.LayoutParams(-1, -2))
+                  }
+                  val d = AlertDialog.Builder(this)
+                      .setTitle("RIZZXY STORE")
+                      .setMessage("Masukkan password untuk masuk")
+                      .setView(wrap)
+                      .setCancelable(false)
+                      .setPositiveButton("MASUK", null)
+                      .setNegativeButton("KELUAR") { _, _ -> finish() }
+                      .create()
+                  d.show()
+                  d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                      if (sha256(et.text.toString().trim().uppercase()) == PW_HASH) {
+                          unlocked = true
+                          ui.visibility = View.VISIBLE
+                          d.dismiss()
+                      } else {
+                          et.setText("")
+                          et.error = "Password salah"
+                      }
+                  }
               }
 
               override fun onDestroy() {
@@ -1637,7 +1698,7 @@ jobs:
                   reqBox.addView(nEt)
                   reqBox.addView(tv("Nomor awal (naik 1 tiap server)", 10f, muted, true).apply { setPadding(0, dp(8), 0, 0) })
                   val sEt = EditText(this)
-                  sEt.setText(Cfg.nickStart(this).toString())
+                  sEt.setText("%03d".format(Cfg.nickStart(this)))
                   sEt.textSize = 13f
                   sEt.setSingleLine()
                   sEt.inputType = InputType.TYPE_CLASS_NUMBER
@@ -1936,12 +1997,14 @@ jobs:
               private fun enableAccAuto(viaRoot: Boolean) {
                   adbAsync("AKTIFKAN AKSESIBILITAS") {
                       val grant = "pm grant $packageName android.permission.WRITE_SECURE_SETTINGS"
-                      val out = if (viaRoot) {
-                          RootHelper.run(grant)
+                      val raw: String
+                      if (viaRoot) {
+                          raw = RootHelper.run(grant)
                       } else {
                           if (!AdbHelper.connected) throw IllegalStateException("Belum terhubung ke ADB")
-                          AdbHelper.run(this, grant)
-                      }.trim()
+                          raw = AdbHelper.run(this, grant)
+                      }
+                      val out = raw.trim()
                       if (out.isNotEmpty()) AdbHelper.log(out)
                       if (out.contains("Exception", true) || out.contains("Error", true)) {
                           throw IllegalStateException(out.lines().firstOrNull().orEmpty().take(120))
@@ -2222,7 +2285,7 @@ jobs:
               const val MODE_RANDOM = 1
               const val MODE_REQUEST = 2
 
-              fun nickFor(c: Context, no: Int): String = Cfg.nickText(c) + no
+              fun nickFor(c: Context, no: Int): String = Cfg.nickText(c) + "%03d".format(no)
 
               private fun setClip(c: Context, text: String) {
                   try {
